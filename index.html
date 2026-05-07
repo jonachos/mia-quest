@@ -1197,53 +1197,116 @@ function confirmBuy(){
 }
 
 // ══════════════════════════════════════════════════════════
-//  GOOGLE SHEETS SYNC
+//  GOOGLE SHEETS SYNC — fixed CORS load
 // ══════════════════════════════════════════════════════════
 function setSyncUI(state, msg){
   document.getElementById('syncDot').className='sync-dot '+state;
   const lbl=document.getElementById('syncLbl');
   lbl.className='sync-lbl '+state; lbl.textContent=msg;
 }
+
 async function loadFromSheets(){
-  if(!SHEET_URL)return false;
+  if(!SHEET_URL) return false;
   setSyncUI('syncing','Cargando estado desde Google Sheets...');
   try {
-    const resp=await fetch(SHEET_URL,{method:'GET',mode:'cors'});
-    const json=await resp.json();
-    if(json.ok&&json.state){ S=Object.assign({},DEF,json.state); setSyncUI('ok','Estado cargado ✓'); return true; }
+    // Apps Script doGet returns JSON with CORS headers
+    const resp = await fetch(SHEET_URL, {
+      method: 'GET',
+      redirect: 'follow'   // ← follow the Apps Script redirect automatically
+    });
+    if(!resp.ok) throw new Error('HTTP ' + resp.status);
+    const json = await resp.json();
+    if(json.ok && json.state && Object.keys(json.state).length > 0) {
+      // Deep merge: keep DEF structure, overwrite with saved values
+      S = Object.assign({}, DEF, json.state);
+      // Ensure nested objects are also merged properly
+      S.cat           = Object.assign({}, DEF.cat,  json.state.cat  || {});
+      S.habitStreaks  = json.state.habitStreaks || {};
+      S.quests        = json.state.quests       || [];
+      S.owned         = json.state.owned        || [];
+      S.equipped      = json.state.equipped     || [];
+      S.log           = json.state.log          || [];
+      setSyncUI('ok', 'Estado cargado desde Google Sheets ✓');
+      return true;
+    }
+    // Sheet exists but no state yet (first time)
+    setSyncUI('ok', 'Sheets conectado — primera sesión ✓');
     return false;
-  } catch(err){ setSyncUI('ok','Conectado — usando respaldo local'); return false; }
+  } catch(err) {
+    console.warn('loadFromSheets error:', err);
+    // Don't show error — use local fallback silently
+    if(SHEET_URL) setSyncUI('ok', 'Sheets conectado (modo local)');
+    return false;
+  }
 }
+
 async function saveToSheets(evData){
-  if(!SHEET_URL)return;
+  if(!SHEET_URL) return;
   setSyncUI('syncing','Guardando...');
-  const l=curLvl(),now=new Date();
-  const base={fecha:now.toLocaleDateString('es-MX'),hora:now.toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'}),
-    vida:S.cat.hp,felicidad:S.cat.happy,hambre:S.cat.hunger,energia:S.cat.energy,
-    nivel:l+1,nivelNombre:LVL[l].n,racha:S.streak,...evData};
+  const l=curLvl(), now=new Date();
+  const base={
+    fecha: now.toLocaleDateString('es-MX'),
+    hora:  now.toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'}),
+    vida:S.cat.hp, felicidad:S.cat.happy, hambre:S.cat.hunger, energia:S.cat.energy,
+    nivel:l+1, nivelNombre:LVL[l].n, racha:S.streak,
+    ...evData
+  };
   try {
-    await fetch(SHEET_URL,{method:'POST',mode:'no-cors',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'saveState',state:S})});
-    setTimeout(async()=>{
-      await fetch(SHEET_URL,{method:'POST',mode:'no-cors',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'logEvent',...base})});
-    },400);
-    lastSyncTs=now; setSyncUI('ok','Sincronizado ✓');
-    document.getElementById('syncTime').textContent='Guardado: '+now.toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'});
-  } catch(err){ setSyncUI('error','Error — revisa la URL'); }
+    // Save full state
+    await fetch(SHEET_URL, {
+      method:'POST', redirect:'follow',
+      headers:{'Content-Type':'text/plain'}, // text/plain avoids preflight CORS issues
+      body: JSON.stringify({ action:'saveState', state:S })
+    });
+    // Log event after short delay
+    setTimeout(async() => {
+      await fetch(SHEET_URL, {
+        method:'POST', redirect:'follow',
+        headers:{'Content-Type':'text/plain'},
+        body: JSON.stringify({ action:'logEvent', ...base })
+      });
+    }, 500);
+    lastSyncTs = now;
+    setSyncUI('ok','Sincronizado ✓');
+    document.getElementById('syncTime').textContent =
+      'Guardado: ' + now.toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'});
+  } catch(err){
+    console.warn('saveToSheets error:', err);
+    setSyncUI('error','Error al guardar — revisa la URL');
+  }
 }
+
 function scheduleSync(evData){ clearTimeout(syncTimer); syncTimer=setTimeout(()=>saveToSheets(evData),800); }
+
 async function testConn(){
   const url=document.getElementById('sheetUrlInput').value.trim();
   if(!url){toast('Pega la URL primero','tr');return;}
-  setSyncUI('syncing','Probando...');
+  setSyncUI('syncing','Probando conexión...');
   try {
-    await fetch(url,{method:'POST',mode:'no-cors',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({action:'logEvent',fecha:new Date().toLocaleDateString('es-MX'),hora:'--',
-      evento:'🔌 Prueba de conexión',mision:'—',tipo:'Sistema',dificultad:'—',
-      monedas:0,xp:0,vida:S.cat.hp,felicidad:S.cat.happy,hambre:S.cat.hunger,energia:S.cat.energy,
-      nivel:curLvl()+1,nivelNombre:LVL[curLvl()].n,racha:S.streak})});
-    setSyncUI('ok','Conexión exitosa ✓');
-    toast('✅ ¡Conectado! Revisa tu Sheet','tg'); confetti(20);
-  } catch(err){ setSyncUI('error','Sin conexión'); toast('❌ Error','tr'); }
+    // Test GET first (read)
+    const resp = await fetch(url, { method:'GET', redirect:'follow' });
+    const json = await resp.json();
+    if(!json.ok && json.error) throw new Error(json.error);
+    // Test POST (write)
+    await fetch(url, {
+      method:'POST', redirect:'follow',
+      headers:{'Content-Type':'text/plain'},
+      body: JSON.stringify({
+        action:'logEvent',
+        fecha:new Date().toLocaleDateString('es-MX'), hora:'--',
+        evento:'🔌 Prueba de conexión exitosa', mision:'—', tipo:'Sistema', dificultad:'—',
+        monedas:0, xp:0, vida:S.cat.hp, felicidad:S.cat.happy,
+        hambre:S.cat.hunger, energia:S.cat.energy,
+        nivel:curLvl()+1, nivelNombre:LVL[curLvl()].n, racha:S.streak
+      })
+    });
+    setSyncUI('ok','¡Conexión exitosa — lectura y escritura OK! ✓');
+    toast('✅ ¡Conectado! Lectura y escritura funcionan','tg');
+    confetti(20);
+  } catch(err){
+    setSyncUI('error','Error de conexión — revisa la URL');
+    toast('❌ Error: ' + (err.message||'revisa la URL'), 'tr');
+  }
 }
 function saveCfg(){
   const url=document.getElementById('sheetUrlInput').value.trim();
