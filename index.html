@@ -222,6 +222,8 @@ body.critical::after {
 .rc-r {background:rgba(248,113,113,.12);color:var(--red);   border:1px solid rgba(248,113,113,.2);}
 .q-del{background:none;border:none;color:var(--dim);font-size:14px;cursor:pointer;padding:0 2px;opacity:.4;transition:opacity .15s;line-height:1;flex-shrink:0;}
 .q-del:hover{opacity:1;color:var(--red);}
+.q-edit{background:none;border:none;color:var(--dim);font-size:13px;cursor:pointer;padding:0 2px;opacity:.4;transition:opacity .15s;line-height:1;flex-shrink:0;}
+.q-edit:hover{opacity:1;color:var(--gold);}
 
 .empty{text-align:center;padding:26px 20px;color:var(--dim);}
 .empty-icon{font-size:30px;margin-bottom:8px;opacity:.5;}
@@ -523,7 +525,7 @@ body.critical::after {
 <div class="modal-bg" id="addModal">
   <div class="modal">
     <button class="modal-close" onclick="closeAdd()">✕</button>
-    <div class="modal-title">+ NUEVA MISIÓN</div>
+    <div class="modal-title" id="addModalTitle">+ NUEVA MISIÓN</div>
     <div class="fm"><label class="fml">Tipo</label>
       <select class="fms" id="nType" onchange="toggleDifficultyField()">
         <option value="habit">🐾 Hábito (recurrente, sin fecha límite)</option>
@@ -551,7 +553,7 @@ body.critical::after {
     </div>
     <div class="modal-btns">
       <button class="btn btn-ghost" onclick="closeAdd()">Cancelar</button>
-      <button class="btn btn-gold" onclick="saveQuest()">¡Agregar!</button>
+      <button class="btn btn-gold" id="saveQuestBtn" onclick="saveQuest()">¡Agregar!</button>
     </div>
   </div>
 </div>
@@ -1333,29 +1335,87 @@ function copyScript(){
 const EMOJIS=['🐾','🏃','💧','📚','🧘','😴','🥗','🎨','🎵','💪','🧠','📔','🌱','🏋️','🚶','💊','🧹','🔥','⚡','🎯','📋','💡','🔑','🎮','🌙','☀️','🐱','🎓','💼','🔮','🧩','🎯','📝','🖊️'];
 let selE='🐾';
 
+let editingId = null; // null = new quest, number = editing existing
+
 function toggleDifficultyField(){
   const type=document.getElementById('nType').value;
   document.getElementById('diffField').style.display=type==='task'?'':'none';
 }
-function openAdd(){ selE='🐾'; document.getElementById('nName').value=''; buildEP(); document.getElementById('addModal').classList.add('open'); toggleDifficultyField(); }
-function closeAdd(){ document.getElementById('addModal').classList.remove('open'); }
+
+function openAdd(){
+  editingId = null;
+  selE='🐾';
+  document.getElementById('nName').value='';
+  document.getElementById('nType').value='habit';
+  document.getElementById('nDiff').value='medium';
+  document.getElementById('nRew').value='20';
+  document.getElementById('addModalTitle').textContent='+ NUEVA MISIÓN';
+  document.getElementById('saveQuestBtn').textContent='¡Agregar!';
+  document.getElementById('nType').disabled = false;
+  buildEP();
+  toggleDifficultyField();
+  document.getElementById('addModal').classList.add('open');
+}
+
+function openEdit(id, ev){
+  ev.stopPropagation();
+  const q = S.quests.find(q=>q.id===id); if(!q) return;
+  editingId = id;
+  selE = q.icon;
+  document.getElementById('nName').value = q.name;
+  document.getElementById('nType').value = q.type;
+  document.getElementById('nType').disabled = true; // can't change type on edit
+  document.getElementById('nDiff').value = q.diff || 'medium';
+  // find reward option closest to q.reward
+  const rewOpts = [10,20,35,50];
+  const closest = rewOpts.reduce((a,b)=>Math.abs(b-q.reward)<Math.abs(a-q.reward)?b:a);
+  document.getElementById('nRew').value = String(closest);
+  document.getElementById('addModalTitle').textContent='✏️ EDITAR MISIÓN';
+  document.getElementById('saveQuestBtn').textContent='Guardar cambios';
+  buildEP();
+  toggleDifficultyField();
+  document.getElementById('addModal').classList.add('open');
+}
+
+function closeAdd(){
+  document.getElementById('addModal').classList.remove('open');
+  document.getElementById('nType').disabled = false;
+  editingId = null;
+}
+
 function buildEP(){
   const g=document.getElementById('epGrid'); g.innerHTML='';
   EMOJIS.forEach(e=>{ const b=document.createElement('button'); b.className='ep-b'+(e===selE?' sel':''); b.textContent=e; b.onclick=()=>{ selE=e; g.querySelectorAll('.ep-b').forEach(x=>x.classList.remove('sel')); b.classList.add('sel'); }; g.appendChild(b); });
 }
+
 function saveQuest(){
   const name=document.getElementById('nName').value.trim(); if(!name){document.getElementById('nName').focus();return;}
   const type=document.getElementById('nType').value;
   const diff=document.getElementById('nDiff').value;
   const reward=parseInt(document.getElementById('nRew').value);
   const xpG=reward===10?10:reward===20?15:reward===35?25:40;
-  const q={id:Date.now(),type,icon:selE,name,reward,xp:xpG,done:false,createdAt:Date.now()};
-  if(type==='task') q.diff=diff;
-  S.quests.push(q);
-  if(type==='habit') S.habitStreaks[q.id]={missed:0,done:0};
-  addLog(`${selE} Nueva misión: "${name}"`,'li');
-  closeAdd(); render();
-  scheduleSync({evento:`➕ Nueva ${type==='habit'?'hábito':'tarea'}: ${name}`,mision:name,tipo:type==='habit'?'Hábito':'Tarea',dificultad:type==='task'?DIFF[diff].label:'N/A',monedas:0,xp:0});
+
+  if(editingId !== null){
+    // EDIT existing quest
+    const q = S.quests.find(q=>q.id===editingId); if(!q) return;
+    q.icon   = selE;
+    q.name   = name;
+    q.reward = reward;
+    q.xp     = xpG;
+    if(q.type==='task') q.diff = diff;
+    addLog(`✏️ Editada: "${name}"`, 'li');
+    closeAdd(); render();
+    scheduleSync({evento:`✏️ Misión editada: ${name}`,mision:name,tipo:q.type==='habit'?'Hábito':'Tarea',dificultad:q.type==='task'?DIFF[diff].label:'N/A',monedas:0,xp:0});
+  } else {
+    // NEW quest
+    const q={id:Date.now(),type,icon:selE,name,reward,xp:xpG,done:false,createdAt:Date.now()};
+    if(type==='task') q.diff=diff;
+    S.quests.push(q);
+    if(type==='habit') S.habitStreaks[q.id]={missed:0,done:0};
+    addLog(`${selE} Nueva misión: "${name}"`, 'li');
+    closeAdd(); render();
+    scheduleSync({evento:`➕ Nueva ${type==='habit'?'hábito':'tarea'}: ${name}`,mision:name,tipo:type==='habit'?'Hábito':'Tarea',dificultad:type==='task'?DIFF[diff].label:'N/A',monedas:0,xp:0});
+  }
 }
 
 // ══════════════════════════════════════════════════════════
@@ -1410,8 +1470,9 @@ function renderQuests(type){
         <div class="rc rc-xp">⭐${q.xp}</div>
         ${q.done?'<div class="rc rc-r">❤️+'+((q.type==='task'&&q.diff?DIFF[q.diff].healBonus:5))+'</div>':''}
       </div>
-      <button class="q-del" onclick="deleteQuest(${q.id},event)" title="Eliminar">✕</button>`;
-    d.addEventListener('click', ev=>{ if(!ev.target.classList.contains('q-del')) complete(q.id); });
+      <button class="q-edit" onclick="openEdit(${q.id},event)" title="Editar">✏️</button>
+      <button class="q-del"  onclick="deleteQuest(${q.id},event)" title="Eliminar">✕</button>`;
+    d.addEventListener('click', ev=>{ if(!ev.target.classList.contains('q-del')&&!ev.target.classList.contains('q-edit')) complete(q.id); });
     list.appendChild(d);
   });
 }
