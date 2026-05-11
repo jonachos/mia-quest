@@ -659,10 +659,10 @@ const LS_URL_KEY = 'mia_url_v8';
 
 // Difficulty config
 const DIFF = {
-  easy:   { label:'🟢 Fácil',   days:1, baseDmg:5,  extraDmg:3,  healBonus:5  },
-  medium: { label:'🟡 Media',   days:3, baseDmg:8,  extraDmg:5,  healBonus:8  },
-  hard:   { label:'🟠 Difícil', days:5, baseDmg:12, extraDmg:7,  healBonus:12 },
-  epic:   { label:'🔴 Épico',   days:7, baseDmg:18, extraDmg:10, healBonus:18 },
+  easy:   { label:'🟢 Fácil',   days:1, baseDmg:10,  extraDmg:3,  healBonus:5  },
+  medium: { label:'🟡 Media',   days:3, baseDmg:15,  extraDmg:5,  healBonus:8  },
+  hard:   { label:'🟠 Difícil', days:5, baseDmg:20, extraDmg:7,  healBonus:12 },
+  epic:   { label:'🔴 Épico',   days:7, baseDmg:25, extraDmg:10, healBonus:18 },
 };
 
 // Habit streak multipliers
@@ -677,7 +677,7 @@ const HABIT_STREAK_MULT = [
 
 function habitDmg(missedDays) {
   const tiers = [1,2,3,4,7];
-  const dmgs  = [5,8,10,13,15];
+  const dmgs  = [10, 15, 20, 30, 40];
   let d = 0;
   for(let i=tiers.length-1;i>=0;i--){
     if(missedDays>=tiers[i]){ d=dmgs[i]; break; }
@@ -825,7 +825,7 @@ function runDailyEvaluation() {
   // Apply damage
   if(totalDmg > 0) {
     S.cat.hp = Math.max(0, S.cat.hp - totalDmg);
-    S.cat.happy  = Math.max(0, S.cat.happy  - Math.round(totalDmg * 0.4));
+    S.cat.happy  = Math.max(0, S.cat.happy  - Math.round(totalDmg * 0.5));
     S.cat.hunger = Math.max(0, S.cat.hunger - Math.round(totalDmg * 0.3));
     S.cat.energy = Math.max(0, S.cat.energy - Math.round(totalDmg * 0.3));
     floatDmg(`-${totalDmg}`, 'red');
@@ -1061,10 +1061,10 @@ function catState() {
   if(S.cat.hp <= 5 || S.criticalDays > 0) return 'critical';
   const{hp,happy,hunger,energy}=S.cat, avg=(hp+happy+hunger+energy)/4;
   if(avg>=90) return 'ecstatic';
-  if(hunger<25) return 'hungry';
-  if(hp<30||energy<20) return 'sick';
-  if(happy<35||energy<40) return 'tired';
-  if(avg>=70) return 'happy';
+  if(hunger<70) return 'hungry';
+  if(hp<50||energy<50) return 'sick';
+  if(happy<80||energy<80) return 'tired';
+  if(avg>=80) return 'happy';
   return 'neutral';
 }
 const STATES = {
